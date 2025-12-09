@@ -1,0 +1,21 @@
+{
+  "name": "@sbkl/convex-search/ui",
+  "private": false,
+  "sideEffects": false,
+  "types": "../dist/ui/index.d.ts",
+  "module": "../dist/ui/index.js",
+  "optionalDependencies": {
+    "@meilisearch/instant-meilisearch": "^0.29.0",
+    "algoliasearch": "^5.46.0",
+    "react-instantsearch-nextjs": "^1.0.7",
+    "typesense-instantsearch-adapter": "^2.9.0"
+  },
+  "peerDependencies": {
+    "convex": "^1.30.0",
+    "nuqs": "^2.8.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-instantsearch": "^7.20.1",
+    "zod": "^4.1.13"
+  }
+}
