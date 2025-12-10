@@ -6,14 +6,267 @@ import {
 } from "convex/server";
 import type {
   Auth,
+  DocumentByName,
   GenericActionCtx,
   GenericDataModel,
   HttpRouter,
+  TableNamesInDataModel,
 } from "convex/server";
 import { v } from "convex/values";
-import type { ComponentApi } from "../component/_generated/component.js";
+import type { ComponentApi } from "../component/_generated/component";
+import type { SearchConfig, SearchOptions } from "../schemas/providers";
+import z from "zod";
 
-export class Search {}
+type TableField<
+  DataModel extends GenericDataModel,
+  TableName extends TableNamesInDataModel<DataModel>,
+> = Exclude<
+  keyof DocumentByName<DataModel, TableName> & string,
+  "_id" | "_creationTime"
+>;
+
+export type SchemaFor<DataModel extends GenericDataModel> = Partial<{
+  [TableName in TableNamesInDataModel<DataModel>]: {
+    scope?: TableField<DataModel, TableName>[];
+    query?: {
+      searchableAttributes: TableField<DataModel, TableName>[];
+      urlKey?: string;
+    };
+    filters?: {
+      kind: "refinementList" | "hierarchicalMenu" | "menu";
+      attribute: TableField<DataModel, TableName>;
+      urlKey?: string;
+    }[];
+    sortableAttributes?: TableField<DataModel, TableName>[];
+  };
+}>;
+
+type SchemaProp =
+  | "scope"
+  | "query"
+  | "filters"
+  // | "searchableAttributes"
+  // | "filterableAttributes"
+  | "sortableAttributes";
+
+const SCHEMA_PROPS: readonly SchemaProp[] = [
+  "scope",
+  "query",
+  "filters",
+  // "searchableAttributes",
+  // "filterableAttributes",
+  "sortableAttributes",
+] as const;
+
+function findDuplicates(arr: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+
+  for (const item of arr) {
+    if (seen.has(item)) dupes.add(item);
+    else seen.add(item);
+  }
+
+  return [...dupes];
+}
+
+export function assertNoDuplicatesInSchema<DataModel extends GenericDataModel>(
+  schema: SchemaFor<DataModel>,
+): void {
+  const issues: string[] = [];
+
+  for (const [tableName, tableConfig] of Object.entries(schema) as Array<
+    [
+      TableNamesInDataModel<DataModel> & string,
+      SchemaFor<DataModel>[TableNamesInDataModel<DataModel>],
+    ]
+  >) {
+    for (const prop of SCHEMA_PROPS) {
+      const arr = tableConfig?.[prop];
+      if (
+        typeof arr === "object" &&
+        prop === "query" &&
+        "searchableAttributes" in arr
+      ) {
+        const dupes = findDuplicates(
+          arr.searchableAttributes as readonly string[],
+        );
+        if (dupes.length > 0) {
+          issues.push(
+            `${tableName}.${prop}.searchableAttributes: ${dupes.join(", ")}`,
+          );
+        }
+        continue;
+      }
+      if (prop === "filters" && Array.isArray(arr) && prop === "filters") {
+        const attributes = arr?.reduce<string[]>((acc, f) => {
+          if (typeof f === "object" && "attribute" in f) {
+            acc.push(f.attribute);
+          }
+          return acc;
+        }, []);
+        const dupes = findDuplicates(attributes);
+        if (dupes.length > 0) {
+          issues.push(`${tableName}.${prop}.filters: ${dupes.join(", ")}`);
+        }
+        continue;
+      }
+
+      if (Array.isArray(arr) && !arr?.length) continue;
+
+      const dupes = findDuplicates(arr as readonly string[]);
+      if (dupes.length > 0) {
+        issues.push(`${tableName}.${prop}: ${dupes.join(", ")}`);
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new Error(
+      [
+        "Schema contains duplicate values.",
+        ...issues.map((i) => `- ${i}`),
+      ].join("\n"),
+    );
+  }
+}
+
+type DocFor<
+  DataModel extends GenericDataModel,
+  T extends TableNamesInDataModel<DataModel>,
+> = DocumentByName<DataModel, T>;
+
+type ScopeKeysFor<
+  TSchema,
+  TTable extends keyof TSchema & string,
+> = TSchema[TTable] extends { scope: readonly (infer F)[] }
+  ? F & string
+  : never;
+
+type ScopeValuesExactFor<
+  DM extends GenericDataModel,
+  TSchema,
+  TTable extends keyof TSchema & string,
+> = {
+  [K in ScopeKeysFor<TSchema, TTable>]-?: DocFor<
+    DM,
+    Extract<TTable, TableNamesInDataModel<DM>>
+  >[K];
+};
+
+// 3) Partition tables by whether they have scope in the literal schema
+type TablesWithScope<TSchema> = {
+  [K in keyof TSchema & string]: TSchema[K] extends { scope: readonly any[] }
+    ? K
+    : never;
+}[keyof TSchema & string];
+
+type TablesWithoutScope<TSchema> = Exclude<
+  keyof TSchema & string,
+  TablesWithScope<TSchema>
+>;
+
+export class Search<
+  DataModel extends GenericDataModel,
+  const TSchema extends SchemaFor<DataModel>,
+> {
+  private config: SearchConfig;
+
+  constructor(
+    public component: ComponentApi,
+    providerOptions: SearchOptions,
+    private readonly schema: TSchema,
+  ) {
+    this.config = this.resolveConfig(providerOptions);
+    assertNoDuplicatesInSchema(this.schema);
+  }
+
+  public createIndex<TTable extends TablesWithoutScope<TSchema>>(
+    tableName: TTable,
+  ): string;
+  public createIndex<TTable extends TablesWithScope<TSchema>>(
+    tableName: TTable,
+    scopeValues: ScopeValuesExactFor<DataModel, TSchema, TTable>,
+  ): string;
+  public createIndex(
+    tableName: keyof TSchema & string,
+    scopeValues?: Record<string, unknown>,
+  ): string {
+    const scopePart = scopeValues
+      ? ":" +
+        Object.entries(scopeValues)
+          .map(([k, v]) => `${k}=${String(v)}`)
+          .join(",")
+      : "";
+
+    const indexName = `${tableName}${scopePart}`;
+
+    return indexName;
+  }
+  /**
+   * Resolve provider options to a complete SearchConfig, using environment variables as fallback.
+   */
+  private resolveConfig(options: SearchOptions): SearchConfig {
+    if (options.provider === "meilisearch") {
+      const host = z
+        .string()
+        .safeParse(options.host ?? process.env.MEILISEARCH_HOST);
+      const apiKey = z
+        .string()
+        .safeParse(options.apiKey ?? process.env.MEILISEARCH_ADMIN_API_KEY);
+
+      if (host.success && apiKey.success) {
+        return {
+          provider: "meilisearch",
+          host: host.data,
+          apiKey: apiKey.data,
+        };
+      }
+    } else if (options.provider === "algolia") {
+      const appId = z
+        .string()
+        .safeParse(options.appId ?? process.env.ALGOLIA_APP_ID);
+      const apiKey = z
+        .string()
+        .safeParse(options.apiKey ?? process.env.ALGOLIA_API_KEY);
+
+      if (appId.success && apiKey.success) {
+        return {
+          provider: "algolia",
+          appId: appId.data,
+          apiKey: apiKey.data,
+        };
+      }
+    } else if (options.provider === "typesense") {
+      const host = z
+        .string()
+        .safeParse(options.host ?? process.env.TYPESENSE_HOST);
+      const apiKey = z
+        .string()
+        .safeParse(options.apiKey ?? process.env.TYPESENSE_API_KEY);
+
+      if (host.success && apiKey.success) {
+        return {
+          provider: "typesense",
+          host: host.data,
+          apiKey: apiKey.data,
+        };
+      }
+    }
+
+    const provider = options.provider;
+    const envVars =
+      provider === "meilisearch"
+        ? "MEILISEARCH_HOST and MEILISEARCH_ADMIN_API_KEY"
+        : provider === "algolia"
+          ? "ALGOLIA_APP_ID and ALGOLIA_API_KEY"
+          : "TYPESENSE_HOST and TYPESENSE_API_KEY";
+
+    throw new Error(`Invalid provider options for ${provider}. You must either:
+        - Provide the necessary credentials in the options to the Search constructor
+        - Set the ${envVars} environment variables in the convex dashboard`);
+  }
+}
 // See the example/convex/example.ts file for how to use this component.
 
 /**

@@ -7,6 +7,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "../shared/popover";
 import { cn } from "../lib/utils";
 import { ChevronDown, X } from "lucide-react";
 import { ButtonGroup } from "../shared/button-group";
+import type z from "zod";
+import type { facetSchema } from "../../schemas/faceting";
 
 export function RefinementList({
   items,
@@ -16,14 +18,7 @@ export function RefinementList({
   handleClear,
   clearHref,
 }: {
-  items: {
-    href: string;
-    value: string;
-    label: string;
-    highlighted?: string;
-    count: number;
-    isRefined: boolean;
-  }[];
+  items: z.infer<typeof facetSchema>[];
   value: string | undefined;
   handleChange: (value: string) => void;
   isRefined: boolean;

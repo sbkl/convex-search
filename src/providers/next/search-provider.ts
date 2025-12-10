@@ -4,41 +4,29 @@ import {
   InstantSearchNext,
   createInstantSearchNextInstance,
 } from "react-instantsearch-nextjs";
-import type { GenericDataModel, TableNamesInDataModel } from "convex/server";
+import type { GenericDataModel } from "convex/server";
 import {
   createCoreSearchProviderFactory,
   type SearchProviderFactoryProps,
   type QueryStateUpdate,
-  type CoreSearchProviderFactoryReturn,
 } from "../search-provider-core";
+import type { SchemaFor } from "../../client";
 
 const instantSearchInstance = createInstantSearchNextInstance();
 
 export type { QueryStateUpdate };
 
-export type NextSearchProviderFactoryReturn<
-  DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>[number],
-> = Omit<
-  CoreSearchProviderFactoryReturn<DataModel, TableName>,
-  "SearchProvider"
-> & {
-  NextSearchProvider: CoreSearchProviderFactoryReturn<
-    DataModel,
-    TableName
-  >["SearchProvider"];
-};
-
 export function createNextSearchProviderFactory<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>[number],
+  const TSchema extends SchemaFor<DataModel>,
+  const TableName extends keyof TSchema & string,
 >(
   props: Omit<
-    SearchProviderFactoryProps<DataModel, TableName>,
+    SearchProviderFactoryProps<DataModel, TSchema, TableName>,
     "InstantSearchComponent" | "instantSearchProps" | "useQueryStatesOptions"
   >,
-): NextSearchProviderFactoryReturn<DataModel, TableName> {
-  const { SearchProvider, ...rest } = createCoreSearchProviderFactory({
+) {
+  return createCoreSearchProviderFactory<DataModel, TSchema, TableName>({
     ...props,
     InstantSearchComponent: InstantSearchNext,
     instantSearchProps: {
@@ -49,9 +37,4 @@ export function createNextSearchProviderFactory<
       shallow: false,
     },
   });
-
-  return {
-    NextSearchProvider: SearchProvider,
-    ...rest,
-  };
 }

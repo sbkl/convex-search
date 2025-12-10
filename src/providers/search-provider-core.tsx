@@ -40,6 +40,7 @@ import type {
 } from "../schemas/faceting";
 import type { SearchOptions } from "../schemas/providers";
 import { createSearchClient } from "./utils";
+import type { SchemaFor } from "../client";
 
 export type Parsers = Record<
   string,
@@ -82,49 +83,69 @@ export type SearchFilter<
 
 export interface SearchProviderFactoryProps<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string = keyof TSchema & string,
 > {
-  query?: {
-    urlKey?: string;
-  };
-  filters?: SearchFilter<DataModel, TableName>[];
-  sortBy?: string;
+  tableName: TableName;
+  schema: TSchema;
+  sortBy: string;
   InstantSearchComponent: React.ComponentType<any>;
   instantSearchProps?: Record<string, any>;
   useQueryStatesOptions?: Partial<UseQueryStatesOptions<Parsers>>;
 }
 
+type FilterAttribute<
+  DataModel extends GenericDataModel,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
+  Kind extends "refinementList" | "hierarchicalMenu" | "menu",
+> =
+  NonNullable<TSchema[TableName]> extends { filters?: ReadonlyArray<infer F> }
+    ? F extends { kind: Kind; attribute: infer A }
+      ? A & string
+      : never
+    : never;
+
 export interface UseInfiniteHitsProps<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
 > extends InstantsearchInfiniteHitsProps<
     DocumentByName<DataModel, TableName>
   > {}
 
 export interface UseHierarchicalMenuProps<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
 > extends InstantsearchHierarchicalMenuProps {
   label: string;
-  attributes: `${keyof DocumentByName<DataModel, TableName> & string}.lvl${number}`[];
+  attributes: `${FilterAttribute<
+    DataModel,
+    TSchema,
+    TableName,
+    "hierarchicalMenu"
+  >}.lvl${number}`[];
   skipSuspense?: boolean;
 }
 
 export interface UseRefinementListProps<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
 > extends InstantsearchRefinementListProps {
   label: string;
-  attribute: keyof DocumentByName<DataModel, TableName> & string;
+  attribute: FilterAttribute<DataModel, TSchema, TableName, "refinementList">;
   skipSuspense?: boolean;
 }
 
 export interface UseMenuProps<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
 > extends InstantsearchMenuProps {
   label: string;
-  attribute: keyof DocumentByName<DataModel, TableName> & string;
+  attribute: FilterAttribute<DataModel, TSchema, TableName, "menu">;
   skipSuspense?: boolean;
 }
 
@@ -227,14 +248,16 @@ function getUpdate(
 
 type InfiniteHitsReturnType<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>[number],
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
 > = ReturnType<
   typeof useReactInstantsearchInfiniteHits<DocumentByName<DataModel, TableName>>
 >;
 
 export interface CoreSearchProviderFactoryReturn<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>[number],
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
 > {
   SearchProvider: React.ComponentType<SearchProviderProps>;
   useSearch: () => {
@@ -246,9 +269,13 @@ export interface CoreSearchProviderFactoryReturn<
     handleClear: () => void;
   };
   useHierarchicalMenu: (
-    props: UseHierarchicalMenuProps<DataModel, TableName>,
+    props: UseHierarchicalMenuProps<DataModel, TSchema, TableName>,
   ) => {
-    attributes: UseHierarchicalMenuProps<DataModel, TableName>["attributes"];
+    attributes: UseHierarchicalMenuProps<
+      DataModel,
+      TSchema,
+      TableName
+    >["attributes"];
     items: z.infer<typeof hierarchicalMenuFacetSchema>[];
     handleChange: (value: string) => void;
     isRefined: boolean;
@@ -256,7 +283,9 @@ export interface CoreSearchProviderFactoryReturn<
     value: string;
     clearHref: string;
   };
-  useRefinementList: (props: UseRefinementListProps<DataModel, TableName>) => {
+  useRefinementList: (
+    props: UseRefinementListProps<DataModel, TSchema, TableName>,
+  ) => {
     items: Array<z.infer<typeof facetSchema>>;
     value: string;
     handleChange: (value: string) => void;
@@ -272,9 +301,9 @@ export interface CoreSearchProviderFactoryReturn<
     clearCache: () => void;
   };
   useInfiniteHits: (
-    props?: UseInfiniteHitsProps<DataModel, TableName>,
-  ) => InfiniteHitsReturnType<DataModel, TableName>;
-  useMenu: (props: UseMenuProps<DataModel, TableName>) => {
+    props?: UseInfiniteHitsProps<DataModel, TSchema, TableName>,
+  ) => InfiniteHitsReturnType<DataModel, TSchema, TableName>;
+  useMenu: (props: UseMenuProps<DataModel, TSchema, TableName>) => {
     items: Array<z.infer<typeof facetSchema>>;
     value: string;
     handleChange: (value: string) => void;
@@ -286,17 +315,20 @@ export interface CoreSearchProviderFactoryReturn<
 
 export function createCoreSearchProviderFactory<
   DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>[number],
+  const TSchema extends SchemaFor<DataModel>,
+  const TableName extends keyof TSchema & string,
 >({
+  schema,
+  tableName,
   sortBy,
-  filters,
   InstantSearchComponent,
   instantSearchProps,
   useQueryStatesOptions,
 }: SearchProviderFactoryProps<
   DataModel,
+  TSchema,
   TableName
->): CoreSearchProviderFactoryReturn<DataModel, TableName> {
+>): CoreSearchProviderFactoryReturn<DataModel, TSchema, TableName> {
   const SearchContext = React.createContext<SearchContextProps | undefined>(
     undefined,
   );
@@ -362,10 +394,12 @@ export function createCoreSearchProviderFactory<
       > = {};
       const urlKeys: Partial<
         Record<
-          (keyof DocumentByName<DataModel, TableName> & string) | "query",
+          | (keyof DocumentByName<DataModel, typeof tableName> & string)
+          | "query",
           string
         >
       > = {};
+      const filters = schema[tableName]?.filters;
       filters?.forEach((filter) => {
         urlKeys[filter.attribute] = filter.urlKey;
 
@@ -383,10 +417,15 @@ export function createCoreSearchProviderFactory<
       parsers["query"] = parseAsString;
 
       return { parsers, urlKeys };
-    }, [filters]);
+    }, [schema[tableName]?.filters]);
 
     const [queryStatesValues, setQueryStatesValues] = useQueryStates(parsers, {
-      urlKeys,
+      urlKeys: {
+        ...urlKeys,
+        query: schema[tableName]?.query?.urlKey
+          ? schema[tableName]?.query?.urlKey
+          : "q",
+      },
       ...useQueryStatesOptions,
       ...queryStatesOptions,
     });
@@ -432,7 +471,8 @@ export function createCoreSearchProviderFactory<
       (values: any) => {
         const uiState: any = {};
         uiState.query = values.query;
-        filters?.forEach((filter) => {
+
+        schema[tableName]?.filters?.forEach((filter) => {
           const value = values[filter.attribute];
           if (value === undefined || value === null) return;
           if (Array.isArray(value) && value.length === 0) return;
@@ -460,7 +500,7 @@ export function createCoreSearchProviderFactory<
         });
         return uiState;
       },
-      [filters],
+      [schema[tableName]?.filters],
     );
 
     return (
@@ -546,7 +586,11 @@ export function createCoreSearchProviderFactory<
     label,
     skipSuspense = false,
     ...props
-  }: UseHierarchicalMenuProps<DataModel, TableName>) {
+  }: InstantsearchHierarchicalMenuProps & {
+    label: string;
+    attributes: string[];
+    skipSuspense?: boolean;
+  }) {
     const context = React.useContext(SearchContext);
     if (!context) {
       throw new Error(
@@ -622,7 +666,7 @@ export function createCoreSearchProviderFactory<
     }
 
     return {
-      attributes: props.attributes,
+      attributes: props.attributes as any,
       items: mapOptions(items),
       handleChange,
       isRefined: canClearRefinement,
@@ -640,7 +684,11 @@ export function createCoreSearchProviderFactory<
     label,
     skipSuspense = false,
     ...props
-  }: UseMenuProps<DataModel, TableName>) {
+  }: InstantsearchMenuProps & {
+    label: string;
+    attribute: string;
+    skipSuspense?: boolean;
+  }) {
     const context = React.useContext(SearchContext);
     if (!context) {
       throw new Error("useMenu must be used within a SearchProvider");
@@ -710,7 +758,11 @@ export function createCoreSearchProviderFactory<
     label,
     skipSuspense = false,
     ...props
-  }: UseRefinementListProps<DataModel, TableName>) {
+  }: InstantsearchRefinementListProps & {
+    label: string;
+    attribute: string;
+    skipSuspense?: boolean;
+  }) {
     const context = React.useContext(SearchContext);
     if (!context) {
       throw new Error("useRefinementList must be used within a SearchProvider");
@@ -805,11 +857,13 @@ export function createCoreSearchProviderFactory<
     };
   }
 
-  function useInfiniteHits(props?: UseInfiniteHitsProps<DataModel, TableName>) {
+  function useInfiniteHits(
+    props?: UseInfiniteHitsProps<DataModel, TSchema, typeof tableName>,
+  ) {
     const query =
-      useReactInstantsearchInfiniteHits<DocumentByName<DataModel, TableName>>(
-        props,
-      );
+      useReactInstantsearchInfiniteHits<
+        DocumentByName<DataModel, typeof tableName>
+      >(props);
 
     return query;
   }
