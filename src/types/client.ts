@@ -39,6 +39,7 @@ export type TableField<
 
 export type SchemaFor<DataModel extends GenericDataModel> = Partial<{
   [TableName in TableNamesInDataModel<DataModel>]: {
+    primaryKey?: TableField<DataModel, TableName>;
     scope?: TableField<DataModel, TableName>[];
     query?: {
       searchableAttributes: TableField<DataModel, TableName>[];

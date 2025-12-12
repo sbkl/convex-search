@@ -11,14 +11,14 @@ export const indexSchema = z.object({
   tableName: z.string(),
   /** The primary key field name for the index */
   primaryKey: z.string(),
+  /** Unique attribute that can be used to scope multiple index/collections targeting the same convex table (e.g., for multitenancy: organisationId) */
+  scope: z.record(z.string(), z.any()).optional(),
   /** Attributes from the convex table that are searchable (full-text search) */
   searchableAttributes: z.array(z.string()),
   /** Attributes from the convex table that can be used for faceting. filterableAttributes for Meilisearch, attributesForFaceting for Algolia... */
-  facetableAttributes: z.array(z.string()),
+  filterableAttributes: z.array(z.string()),
   /** Attributes from the convex table that can be used for sorting */
   sortableAttributes: z.array(z.string()),
-  /** Unique attribute that can be used to scope multiple index/collections targeting the same convex table (e.g., for multitenancy: organisationId) */
-  scope: z.string(),
 });
 
 export type IndexSchema = z.infer<typeof indexSchema>;

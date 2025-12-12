@@ -10,11 +10,13 @@
 
 import type * as example from "../example.js";
 import type * as http from "../http.js";
-import type * as materials_search from "../materials/search.js";
+import type * as materials_action from "../materials/action.js";
 import type * as materials_table from "../materials/table.js";
+import type * as organisations_mutation from "../organisations/mutation.js";
 import type * as organisations_table from "../organisations/table.js";
 import type * as schemas_materials from "../schemas/materials.js";
 import type * as schemas_organisations from "../schemas/organisations.js";
+import type * as search from "../search.js";
 
 import type {
   ApiFromModules,
@@ -25,11 +27,13 @@ import type {
 declare const fullApi: ApiFromModules<{
   example: typeof example;
   http: typeof http;
-  "materials/search": typeof materials_search;
+  "materials/action": typeof materials_action;
   "materials/table": typeof materials_table;
+  "organisations/mutation": typeof organisations_mutation;
   "organisations/table": typeof organisations_table;
   "schemas/materials": typeof schemas_materials;
   "schemas/organisations": typeof schemas_organisations;
+  search: typeof search;
 }>;
 
 /**

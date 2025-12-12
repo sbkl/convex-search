@@ -23,6 +23,47 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
+    indexes: {
+      action: {
+        createIndex: FunctionReference<
+          "action",
+          "internal",
+          {
+            config:
+              | { apiKey: string; host: string; provider: "meilisearch" }
+              | { apiKey: string; appId: string; provider: "algolia" }
+              | { apiKey: string; host: string; provider: "typesense" };
+            schema: {
+              filters?: Array<{
+                attribute: string;
+                kind: "refinementList" | "hierarchicalMenu" | "menu";
+                urlKey?: string;
+              }>;
+              primaryKey?: string;
+              query?: { searchableAttributes: Array<string>; urlKey?: string };
+              scope?: Array<string>;
+              sortableAttributes?: Array<string>;
+            };
+            scopeValues?: Record<string, any>;
+            tableName: string;
+          },
+          any,
+          Name
+        >;
+        listIndexes: FunctionReference<
+          "action",
+          "internal",
+          {
+            config:
+              | { apiKey: string; host: string; provider: "meilisearch" }
+              | { apiKey: string; appId: string; provider: "algolia" }
+              | { apiKey: string; host: string; provider: "typesense" };
+          },
+          any,
+          Name
+        >;
+      };
+    };
     lib: {
       add: FunctionReference<
         "mutation",
