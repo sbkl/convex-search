@@ -14,7 +14,6 @@ export const search = new Search<DataModel, typeof searchSchema>(
 
 const indexName = search.createIndex("materials", {
   organisationId: "123" as Id<"organisations">,
-  team: "Hello",
 });
 
 console.log("indexName", indexName);

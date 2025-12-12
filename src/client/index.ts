@@ -16,47 +16,13 @@ import { v } from "convex/values";
 import type { ComponentApi } from "../component/_generated/component";
 import type { SearchConfig, SearchOptions } from "../schemas/providers";
 import z from "zod";
-
-type TableField<
-  DataModel extends GenericDataModel,
-  TableName extends TableNamesInDataModel<DataModel>,
-> = Exclude<
-  keyof DocumentByName<DataModel, TableName> & string,
-  "_id" | "_creationTime"
->;
-
-export type SchemaFor<DataModel extends GenericDataModel> = Partial<{
-  [TableName in TableNamesInDataModel<DataModel>]: {
-    scope?: TableField<DataModel, TableName>[];
-    query?: {
-      searchableAttributes: TableField<DataModel, TableName>[];
-      urlKey?: string;
-    };
-    filters?: {
-      kind: "refinementList" | "hierarchicalMenu" | "menu";
-      attribute: TableField<DataModel, TableName>;
-      urlKey?: string;
-    }[];
-    sortableAttributes?: TableField<DataModel, TableName>[];
-  };
-}>;
-
-type SchemaProp =
-  | "scope"
-  | "query"
-  | "filters"
-  // | "searchableAttributes"
-  // | "filterableAttributes"
-  | "sortableAttributes";
-
-const SCHEMA_PROPS: readonly SchemaProp[] = [
-  "scope",
-  "query",
-  "filters",
-  // "searchableAttributes",
-  // "filterableAttributes",
-  "sortableAttributes",
-] as const;
+import {
+  SCHEMA_PROPS,
+  type SchemaFor,
+  type ScopeValuesExactFor,
+  type TablesWithoutScope,
+  type TablesWithScope,
+} from "../types/client";
 
 function findDuplicates(arr: readonly string[]): string[] {
   const seen = new Set<string>();
@@ -131,41 +97,6 @@ export function assertNoDuplicatesInSchema<DataModel extends GenericDataModel>(
   }
 }
 
-type DocFor<
-  DataModel extends GenericDataModel,
-  T extends TableNamesInDataModel<DataModel>,
-> = DocumentByName<DataModel, T>;
-
-type ScopeKeysFor<
-  TSchema,
-  TTable extends keyof TSchema & string,
-> = TSchema[TTable] extends { scope: readonly (infer F)[] }
-  ? F & string
-  : never;
-
-type ScopeValuesExactFor<
-  DM extends GenericDataModel,
-  TSchema,
-  TTable extends keyof TSchema & string,
-> = {
-  [K in ScopeKeysFor<TSchema, TTable>]-?: DocFor<
-    DM,
-    Extract<TTable, TableNamesInDataModel<DM>>
-  >[K];
-};
-
-// 3) Partition tables by whether they have scope in the literal schema
-type TablesWithScope<TSchema> = {
-  [K in keyof TSchema & string]: TSchema[K] extends { scope: readonly any[] }
-    ? K
-    : never;
-}[keyof TSchema & string];
-
-type TablesWithoutScope<TSchema> = Exclude<
-  keyof TSchema & string,
-  TablesWithScope<TSchema>
->;
-
 export class Search<
   DataModel extends GenericDataModel,
   const TSchema extends SchemaFor<DataModel>,
@@ -181,12 +112,12 @@ export class Search<
     assertNoDuplicatesInSchema(this.schema);
   }
 
-  public createIndex<TTable extends TablesWithoutScope<TSchema>>(
-    tableName: TTable,
+  public createIndex<TableName extends TablesWithoutScope<TSchema>>(
+    tableName: TableName,
   ): string;
-  public createIndex<TTable extends TablesWithScope<TSchema>>(
-    tableName: TTable,
-    scopeValues: ScopeValuesExactFor<DataModel, TSchema, TTable>,
+  public createIndex<TableName extends TablesWithScope<TSchema>>(
+    tableName: TableName,
+    scopeValues: ScopeValuesExactFor<DataModel, TSchema, TableName>,
   ): string;
   public createIndex(
     tableName: keyof TSchema & string,

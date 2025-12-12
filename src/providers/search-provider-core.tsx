@@ -40,7 +40,11 @@ import type {
 } from "../schemas/faceting";
 import type { SearchOptions } from "../schemas/providers";
 import { createSearchClient } from "./utils";
-import type { SchemaFor } from "../client";
+import type {
+  SchemaFor,
+  ScopeValuesExactFor,
+  TablesWithScope,
+} from "../types/client";
 
 export type Parsers = Record<
   string,
@@ -55,6 +59,29 @@ export type QueryStateUpdate = {
   value: string | null;
 };
 
+type FilterAttribute<
+  DataModel extends GenericDataModel,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
+  Kind extends "refinementList" | "hierarchicalMenu" | "menu",
+> =
+  NonNullable<TSchema[TableName]> extends { filters?: ReadonlyArray<infer F> }
+    ? F extends { kind: Kind; attribute: infer A }
+      ? A & string
+      : never
+    : never;
+
+type SortByAttribute<
+  DataModel extends GenericDataModel,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
+> =
+  NonNullable<TSchema[TableName]> extends {
+    sortableAttributes?: ReadonlyArray<infer S>;
+  }
+    ? S & string
+    : never;
+
 export interface SearchContextProps {
   indexName: string;
   queryStatesValues: QueryStateValues;
@@ -64,13 +91,25 @@ export interface SearchContextProps {
   clearCache(): void;
 }
 
-export interface SearchProviderProps {
+export type SearchProviderProps<
+  DataModel extends GenericDataModel,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
+> = {
   children: React.ReactNode;
   config: SearchOptions;
-  indexName: string;
   lastSyncedAt?: number;
+  initialSortBy?: `${SortByAttribute<DataModel, TSchema, TableName>}:${"asc" | "desc"}`;
   queryStatesOptions?: Omit<Partial<UseQueryStatesOptions<Parsers>>, "urlKeys">;
-}
+} & (TableName extends TablesWithScope<TSchema>
+  ? {
+      scope: ScopeValuesExactFor<
+        DataModel,
+        TSchema,
+        Extract<TableName, TablesWithScope<TSchema>>
+      >;
+    }
+  : { scope?: never });
 
 export type SearchFilter<
   DataModel extends GenericDataModel,
@@ -88,23 +127,10 @@ export interface SearchProviderFactoryProps<
 > {
   tableName: TableName;
   schema: TSchema;
-  sortBy: string;
   InstantSearchComponent: React.ComponentType<any>;
   instantSearchProps?: Record<string, any>;
   useQueryStatesOptions?: Partial<UseQueryStatesOptions<Parsers>>;
 }
-
-type FilterAttribute<
-  DataModel extends GenericDataModel,
-  TSchema extends SchemaFor<DataModel>,
-  TableName extends keyof TSchema & string,
-  Kind extends "refinementList" | "hierarchicalMenu" | "menu",
-> =
-  NonNullable<TSchema[TableName]> extends { filters?: ReadonlyArray<infer F> }
-    ? F extends { kind: Kind; attribute: infer A }
-      ? A & string
-      : never
-    : never;
 
 export interface UseInfiniteHitsProps<
   DataModel extends GenericDataModel,
@@ -147,6 +173,34 @@ export interface UseMenuProps<
   label: string;
   attribute: FilterAttribute<DataModel, TSchema, TableName, "menu">;
   skipSuspense?: boolean;
+}
+
+function getIndexName<
+  DataModel extends GenericDataModel,
+  TSchema extends SchemaFor<DataModel>,
+  TableName extends keyof TSchema & string,
+>(
+  schema: SchemaFor<DataModel>,
+  tableName: TableName,
+  scope?: ScopeValuesExactFor<DataModel, TSchema, TableName>,
+) {
+  const schemaScopeArr = schema[tableName]?.scope;
+
+  if (!schemaScopeArr) {
+    return `${tableName}`;
+  }
+
+  if (!scope) {
+    throw new Error(`Scope is required for table: ${tableName}`);
+  }
+
+  return schemaScopeArr.reduce<string>((acc, scopeKey) => {
+    const scopeValue = scope[scopeKey as unknown as keyof typeof scope];
+    if (scopeValue) {
+      acc = `${acc}_${scopeValue}`;
+    }
+    return acc;
+  }, tableName);
 }
 
 function getUpdate(
@@ -259,7 +313,9 @@ export interface CoreSearchProviderFactoryReturn<
   TSchema extends SchemaFor<DataModel>,
   TableName extends keyof TSchema & string,
 > {
-  SearchProvider: React.ComponentType<SearchProviderProps>;
+  SearchProvider: React.ComponentType<
+    SearchProviderProps<DataModel, TSchema, TableName>
+  >;
   useSearch: () => {
     query: string;
     inputRef: React.RefObject<HTMLInputElement | null>;
@@ -320,7 +376,6 @@ export function createCoreSearchProviderFactory<
 >({
   schema,
   tableName,
-  sortBy,
   InstantSearchComponent,
   instantSearchProps,
   useQueryStatesOptions,
@@ -346,6 +401,7 @@ export function createCoreSearchProviderFactory<
     }
 
     const indexName = context.indexName;
+
     const queryStatesValues = context.optimisticParams;
 
     const { setUiState } = useInstantSearch();
@@ -355,7 +411,6 @@ export function createCoreSearchProviderFactory<
       const id = setTimeout(() => {
         const specificUiState = uiStateMapper(queryStatesValues);
         setUiState((prev) => ({
-          ...prev,
           [indexName]: {
             ...prev[indexName],
             ...specificUiState,
@@ -371,10 +426,16 @@ export function createCoreSearchProviderFactory<
   function SearchProvider({
     children,
     lastSyncedAt,
-    indexName,
     queryStatesOptions,
     config,
-  }: SearchProviderProps) {
+    initialSortBy,
+    scope,
+  }: SearchProviderProps<DataModel, TSchema, TableName>) {
+    const indexName = React.useMemo(
+      () => getIndexName(schema, tableName, scope),
+      [schema, tableName, scope],
+    );
+    const [sortBy, setSortBy] = React.useState(initialSortBy);
     const [resetKey, setResetKey] = React.useState(0);
 
     const searchClient = React.useMemo(() => {
@@ -481,10 +542,10 @@ export function createCoreSearchProviderFactory<
           switch (filter.kind) {
             case "hierarchicalMenu":
               if (!uiState.hierarchicalMenu) uiState.hierarchicalMenu = {};
-              const parts = (value as string).split(">").map((s) => s.trim());
-              const hierarchicalValues = parts.map((_, i) =>
-                parts.slice(0, i + 1).join(" > "),
-              );
+              const hierarchicalValues = (value as string)
+                .split(">")
+                .map((s) => s.trim());
+
               uiState.hierarchicalMenu[`${filter.attribute}.lvl0`] =
                 hierarchicalValues;
               break;

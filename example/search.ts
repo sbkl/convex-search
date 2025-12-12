@@ -1,9 +1,9 @@
-import type { SchemaFor } from "@sbkl/convex-search";
+import type { SchemaFor } from "@sbkl/convex-search/types";
 import type { DataModel } from "./convex/_generated/dataModel";
 
 export const searchSchema = {
   materials: {
-    scope: ["organisationId", "team"],
+    scope: ["organisationId"],
     query: {
       searchableAttributes: ["identifier", "description"],
       urlKey: "q",
@@ -25,6 +25,6 @@ export const searchSchema = {
         urlKey: "sport",
       },
     ],
-    sortableAttributes: ["inventory"],
+    sortableAttributes: ["inventory", "articleCount"],
   },
 } as const satisfies SchemaFor<DataModel>;
